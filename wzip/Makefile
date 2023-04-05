@@ -4,7 +4,7 @@ TARGET = wzip
 SRCDIR = src
 BINDIR = .
 
-INCLUDE_DIRS = -I../include
+INCLUDE_DIRS = -I./include
 
 all: $(TARGET)
 
