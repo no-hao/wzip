@@ -106,25 +106,26 @@ void process_file(const char *filename, int *counter, char *prev_char) {
       exit(EXIT_FAILURE);
     }
 
-    size_t region_size = file_size / 3;
+    size_t region_starts[3];
+    region_starts[0] = 0;
+    region_starts[1] = file_size / 3;
+    region_starts[2] = 2 * file_size / 3;
+
+    // Find the boundaries of runs
+    for (int i = 1; i < 3; i++) {
+      while (region_starts[i] < file_size &&
+             src[region_starts[i]] == src[region_starts[i] - 1]) {
+        region_starts[i]++;
+      }
+    }
 
     pthread_t threads[3];
     region_args_t thread_args[3];
 
     for (int i = 0; i < 3; i++) {
       thread_args[i].src = src;
-      thread_args[i].start = i * region_size;
-
-      if (i > 0) {
-        // Find the last different character in the overlap region
-        size_t j;
-        for (j = thread_args[i].start;
-             j > 0 && src[j - 1] == src[thread_args[i].start]; j--)
-          ;
-        thread_args[i].start = j;
-      }
-
-      thread_args[i].end = (i == 2) ? file_size : (i + 1) * region_size;
+      thread_args[i].start = region_starts[i];
+      thread_args[i].end = (i == 2) ? file_size : region_starts[i + 1];
 
       if (pthread_create(&threads[i], NULL, process_region, &thread_args[i]) !=
           0) {
@@ -141,8 +142,9 @@ void process_file(const char *filename, int *counter, char *prev_char) {
     }
 
     // Merge the results from the threads
-    merge_runs(&thread_args[0], &thread_args[1]);
-    merge_runs(&thread_args[0], &thread_args[2]);
+    for (int i = 1; i < 3; i++) {
+      merge_runs(&thread_args[0], &thread_args[i]);
+    }
 
     // Output the merged results
     for (int i = 0; i < thread_args[0].run_count; i++) {
