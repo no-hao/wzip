@@ -37,8 +37,10 @@ void merge_runs(region_args_t *args1, region_args_t *args2) {
   }
 
   // Update args1 with the merged results
+  run_t *old_runs = args1->runs;
   args1->runs = merged_runs;
   args1->run_count = merged_run_count;
+  free(old_runs);
 }
 
 void *process_region(void *args) {
@@ -76,8 +78,7 @@ void process_single_threaded(int fd, int *counter, char *prev_char) {
   char curr_char;
   // Read the file character by character.
   while (read(fd, &curr_char, sizeof(char)) == 1) {
-    // If the current char is different from the previous one, write the count
-    // and char
+    // If the current char is diff from the prev one, write the count and char
     if (curr_char != *prev_char) {
       if (*counter > 0) {
         fwrite(counter, sizeof(int), 1, stdout);
@@ -149,7 +150,9 @@ void process_multi_threaded(char *src, size_t file_size, int *counter,
   }
 
   // Free memory
-  free(thread_args[0].runs);
+  for (int i = 0; i < 3; i++) {
+    free(thread_args[i].runs);
+  }
 }
 
 void process_file(const char *filename, int *counter, char *prev_char) {
