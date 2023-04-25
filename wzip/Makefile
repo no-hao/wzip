@@ -3,7 +3,7 @@ CFLAGS = -Wall -Wextra -Werror
 TARGET = wzip
 SRCDIR = src
 INCLUDE_DIRS = -I include
-SOURCES = $(SRCDIR)/$(TARGET).c $(SRCDIR)/wzip_helper.c
+SOURCES = $(SRCDIR)/main.c $(SRCDIR)/wzip_helper.c $(SRCDIR)/file_io.c $(SRCDIR)/multi_threading.c $(SRCDIR)/output_buffer.c $(SRCDIR)/rle.c
 OBJECTS = $(SOURCES:.c=.o)
 
 all: $(TARGET)
@@ -16,3 +16,4 @@ $(SRCDIR)/%.o: $(SRCDIR)/%.c
 
 clean:
 	rm -f $(TARGET) $(OBJECTS)
+
