@@ -1,5 +1,5 @@
 CC = gcc
-CFLAGS = -Wall -Wextra -Werror
+CFLAGS = -Wall -Wextra -Werror -pthread
 TARGET = wzip
 SRCDIR = src
 INCLUDE_DIRS = -I include

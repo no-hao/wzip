@@ -4,6 +4,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
+// Ensures that each region starts on a different character
+// This is important to avoid incorrect compression when merging regions
 void adjust_region_starts(char *src, size_t file_size, size_t *region_starts) {
   for (int i = 1; i < 3; i++) {
     while (region_starts[i] < file_size &&
@@ -13,6 +15,8 @@ void adjust_region_starts(char *src, size_t file_size, size_t *region_starts) {
   }
 }
 
+// Creates threads and assigns regions to be processed by each thread
+// The region information is stored in the thread_args array
 void create_threads(char *src, size_t *region_starts, size_t file_size,
                     pthread_t *threads, region_args_t *thread_args) {
   for (int i = 0; i < 3; i++) {
@@ -28,6 +32,7 @@ void create_threads(char *src, size_t *region_starts, size_t file_size,
   }
 }
 
+// Waits for all threads to finish processing and cleans up resources
 void join_threads(pthread_t *threads) {
   for (int i = 0; i < 3; i++) {
     if (pthread_join(threads[i], NULL) != 0) {
@@ -37,6 +42,8 @@ void join_threads(pthread_t *threads) {
   }
 }
 
+// Processes a region of the file using run-length encoding
+// The result is stored in the shared_buffer field of the region_args struct
 void *process_region(void *args) {
   region_args_t *region_args = (region_args_t *)args;
   char *src = region_args->src;
