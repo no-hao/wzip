@@ -72,6 +72,86 @@ void *process_region(void *args) {
   return (void *)region_args;
 }
 
+void process_single_threaded(int fd, int *counter, char *prev_char) {
+  char curr_char;
+  // Read the file character by character.
+  while (read(fd, &curr_char, sizeof(char)) == 1) {
+    // If the current char is different from the previous one, write the count
+    // and char
+    if (curr_char != *prev_char) {
+      if (*counter > 0) {
+        fwrite(counter, sizeof(int), 1, stdout);
+        fwrite(prev_char, sizeof(char), 1, stdout);
+      }
+      *counter = 1;
+      *prev_char = curr_char;
+    } else {
+      (*counter)++;
+    }
+  }
+}
+
+void process_multi_threaded(char *src, size_t file_size, int *counter,
+                            char *prev_char) {
+  size_t region_starts[3];
+  region_starts[0] = 0;
+  region_starts[1] = file_size / 3;
+  region_starts[2] = 2 * file_size / 3;
+
+  // Find the boundaries of runs
+  for (int i = 1; i < 3; i++) {
+    while (region_starts[i] < file_size &&
+           src[region_starts[i]] == src[region_starts[i] - 1]) {
+      region_starts[i]++;
+    }
+  }
+
+  pthread_t threads[3];
+  region_args_t thread_args[3];
+
+  for (int i = 0; i < 3; i++) {
+    thread_args[i].src = src;
+    thread_args[i].start = region_starts[i];
+    thread_args[i].end = (i == 2) ? file_size : region_starts[i + 1];
+
+    if (pthread_create(&threads[i], NULL, process_region, &thread_args[i]) !=
+        0) {
+      perror("pthread_create");
+      exit(EXIT_FAILURE);
+    }
+  }
+
+  for (int i = 0; i < 3; i++) {
+    if (pthread_join(threads[i], NULL) != 0) {
+      perror("pthread_join");
+      exit(EXIT_FAILURE);
+    }
+  }
+
+  // Merge the results from the threads
+  for (int i = 1; i < 3; i++) {
+    merge_runs(&thread_args[0], &thread_args[i]);
+  }
+
+  // Output the merged results
+  for (int i = 0; i < thread_args[0].run_count; i++) {
+    run_t current_run = thread_args[0].runs[i];
+    if (current_run.character == *prev_char) {
+      *counter += current_run.count;
+    } else {
+      if (*counter > 0) {
+        fwrite(counter, sizeof(int), 1, stdout);
+        fwrite(prev_char, sizeof(char), 1, stdout);
+      }
+      *counter = current_run.count;
+      *prev_char = current_run.character;
+    }
+  }
+
+  // Free memory
+  free(thread_args[0].runs);
+}
+
 void process_file(const char *filename, int *counter, char *prev_char) {
   int fd = open(filename, O_RDONLY);
   if (fd == -1) {
@@ -83,21 +163,7 @@ void process_file(const char *filename, int *counter, char *prev_char) {
 
   if (file_size <= THRESHOLD) {
     // Process the file using the existing single-threaded approach
-    char curr_char;
-    // Read the file character by character.
-    while (read(fd, &curr_char, sizeof(char)) == 1) {
-      // If the current char is diff from the prev one, write the count and char
-      if (curr_char != *prev_char) {
-        if (*counter > 0) {
-          fwrite(counter, sizeof(int), 1, stdout);
-          fwrite(prev_char, sizeof(char), 1, stdout);
-        }
-        *counter = 1;
-        *prev_char = curr_char;
-      } else {
-        (*counter)++;
-      }
-    }
+    process_single_threaded(fd, counter, prev_char);
   } else {
     // Process the file using multi-threaded approach with mmap
     char *src = mmap(NULL, file_size, PROT_READ, MAP_PRIVATE, fd, 0);
@@ -106,63 +172,7 @@ void process_file(const char *filename, int *counter, char *prev_char) {
       exit(EXIT_FAILURE);
     }
 
-    size_t region_starts[3];
-    region_starts[0] = 0;
-    region_starts[1] = file_size / 3;
-    region_starts[2] = 2 * file_size / 3;
-
-    // Find the boundaries of runs
-    for (int i = 1; i < 3; i++) {
-      while (region_starts[i] < file_size &&
-             src[region_starts[i]] == src[region_starts[i] - 1]) {
-        region_starts[i]++;
-      }
-    }
-
-    pthread_t threads[3];
-    region_args_t thread_args[3];
-
-    for (int i = 0; i < 3; i++) {
-      thread_args[i].src = src;
-      thread_args[i].start = region_starts[i];
-      thread_args[i].end = (i == 2) ? file_size : region_starts[i + 1];
-
-      if (pthread_create(&threads[i], NULL, process_region, &thread_args[i]) !=
-          0) {
-        perror("pthread_create");
-        exit(EXIT_FAILURE);
-      }
-    }
-
-    for (int i = 0; i < 3; i++) {
-      if (pthread_join(threads[i], NULL) != 0) {
-        perror("pthread_join");
-        exit(EXIT_FAILURE);
-      }
-    }
-
-    // Merge the results from the threads
-    for (int i = 1; i < 3; i++) {
-      merge_runs(&thread_args[0], &thread_args[i]);
-    }
-
-    // Output the merged results
-    for (int i = 0; i < thread_args[0].run_count; i++) {
-      run_t current_run = thread_args[0].runs[i];
-      if (current_run.character == *prev_char) {
-        *counter += current_run.count;
-      } else {
-        if (*counter > 0) {
-          fwrite(counter, sizeof(int), 1, stdout);
-          fwrite(prev_char, sizeof(char), 1, stdout);
-        }
-        *counter = current_run.count;
-        *prev_char = current_run.character;
-      }
-    }
-
-    // Free memory
-    free(thread_args[0].runs);
+    process_multi_threaded(src, file_size, counter, prev_char);
 
     if (munmap(src, file_size) == -1) {
       perror("munmap");
