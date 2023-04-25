@@ -13,7 +13,7 @@ typedef struct {
   char *src;
   size_t start;
   size_t end;
-  run_t *runs;
+  run_t *shared_buffer;
   int run_count;
 } region_args_t;
 

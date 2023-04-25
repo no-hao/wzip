@@ -18,78 +18,45 @@ size_t get_file_size(int fd) {
   return st.st_size;
 }
 
-void merge_runs(region_args_t *args1, region_args_t *args2) {
-  run_t *merged_runs =
-      malloc(sizeof(run_t) * (args1->run_count + args2->run_count));
-  int merged_run_count = 0;
-
-  for (int i = 0; i < args1->run_count; i++) {
-    merged_runs[merged_run_count++] = args1->runs[i];
-  }
-
-  for (int i = 0; i < args2->run_count; i++) {
-    if (merged_runs[merged_run_count - 1].character ==
-        args2->runs[i].character) {
-      merged_runs[merged_run_count - 1].count += args2->runs[i].count;
-    } else {
-      merged_runs[merged_run_count++] = args2->runs[i];
-    }
-  }
-
-  // Update args1 with the merged results
-  run_t *old_runs = args1->runs;
-  args1->runs = merged_runs;
-  args1->run_count = merged_run_count;
-  free(old_runs);
-}
-
 void *process_region(void *args) {
   region_args_t *region_args = (region_args_t *)args;
   char *src = region_args->src;
   size_t start = region_args->start;
   size_t end = region_args->end;
+  run_t *shared_buffer = region_args->shared_buffer;
 
   // Initialize run-length encoding variables
   run_t current_run = {1, src[start]};
-  run_t *runs = malloc(sizeof(run_t) *
-                       (end - start)); // worst case: all characters are unique
   int run_count = 0;
+
+  // Calculate the allocated size of the shared buffer for this region
+  size_t shared_buffer_size =
+      (region_args->end - region_args->start) * sizeof(run_t);
 
   // Perform run-length encoding for the region
   for (size_t i = start + 1; i < end; i++) {
     if (src[i] == current_run.character) {
       current_run.count++;
     } else {
-      runs[run_count++] = current_run;
+      if (run_count * sizeof(run_t) >= shared_buffer_size) {
+        fprintf(stderr, "Shared buffer overflow in process_region()\n");
+        exit(EXIT_FAILURE);
+      }
+      shared_buffer[run_count++] = current_run;
       current_run.character = src[i];
       current_run.count = 1;
     }
   }
-  runs[run_count++] = current_run;
+  if (run_count * sizeof(run_t) >= shared_buffer_size) {
+    fprintf(stderr, "Shared buffer overflow in process_region()\n");
+    exit(EXIT_FAILURE);
+  }
+  shared_buffer[run_count++] = current_run;
 
-  // Store the encoded runs and run_count in the region_args structure
-  region_args->runs = runs;
+  // Store the encoded run_count in the region_args structure
   region_args->run_count = run_count;
 
   return (void *)region_args;
-}
-
-void process_single_threaded(int fd, int *counter, char *prev_char) {
-  char curr_char;
-  // Read the file character by character.
-  while (read(fd, &curr_char, sizeof(char)) == 1) {
-    // If the current char is diff from the prev one, write the count and char
-    if (curr_char != *prev_char) {
-      if (*counter > 0) {
-        fwrite(counter, sizeof(int), 1, stdout);
-        fwrite(prev_char, sizeof(char), 1, stdout);
-      }
-      *counter = 1;
-      *prev_char = curr_char;
-    } else {
-      (*counter)++;
-    }
-  }
 }
 
 void process_multi_threaded(char *src, size_t file_size, int *counter,
@@ -109,11 +76,16 @@ void process_multi_threaded(char *src, size_t file_size, int *counter,
 
   pthread_t threads[3];
   region_args_t thread_args[3];
+  run_t *shared_buffer = malloc(file_size * sizeof(run_t));
 
   for (int i = 0; i < 3; i++) {
     thread_args[i].src = src;
     thread_args[i].start = region_starts[i];
     thread_args[i].end = (i == 2) ? file_size : region_starts[i + 1];
+    thread_args[i].shared_buffer =
+        shared_buffer +
+        (file_size / 3) *
+            i; // Allocate separate memory segments for each thread
 
     if (pthread_create(&threads[i], NULL, process_region, &thread_args[i]) !=
         0) {
@@ -129,30 +101,26 @@ void process_multi_threaded(char *src, size_t file_size, int *counter,
     }
   }
 
-  // Merge the results from the threads
-  for (int i = 1; i < 3; i++) {
-    merge_runs(&thread_args[0], &thread_args[i]);
-  }
-
-  // Output the merged results
-  for (int i = 0; i < thread_args[0].run_count; i++) {
-    run_t current_run = thread_args[0].runs[i];
-    if (current_run.character == *prev_char) {
-      *counter += current_run.count;
-    } else {
-      if (*counter > 0) {
-        fwrite(counter, sizeof(int), 1, stdout);
-        fwrite(prev_char, sizeof(char), 1, stdout);
+  // Output the results directly from the shared buffer
+  for (int i = 0; i < 3; i++) {
+    region_args_t *current_args = &thread_args[i];
+    for (int j = 0; j < current_args->run_count; j++) {
+      run_t current_run = current_args->shared_buffer[j];
+      if (current_run.character == *prev_char) {
+        *counter += current_run.count;
+      } else {
+        if (*counter > 0) {
+          fwrite(counter, sizeof(int), 1, stdout);
+          fwrite(prev_char, sizeof(char), 1, stdout);
+        }
+        *counter = current_run.count;
+        *prev_char = current_run.character;
       }
-      *counter = current_run.count;
-      *prev_char = current_run.character;
     }
   }
 
   // Free memory
-  for (int i = 0; i < 3; i++) {
-    free(thread_args[i].runs);
-  }
+  free(shared_buffer);
 }
 
 void process_file(const char *filename, int *counter, char *prev_char) {
@@ -186,5 +154,23 @@ void process_file(const char *filename, int *counter, char *prev_char) {
   if (close(fd) == -1) {
     perror("close");
     exit(EXIT_FAILURE);
+  }
+}
+
+void process_single_threaded(int fd, int *counter, char *prev_char) {
+  char curr_char;
+  // Read the file character by character.
+  while (read(fd, &curr_char, sizeof(char)) == 1) {
+    // If the current char is diff from the prev one, write the count and char
+    if (curr_char != *prev_char) {
+      if (*counter > 0) {
+        fwrite(counter, sizeof(int), 1, stdout);
+        fwrite(prev_char, sizeof(char), 1, stdout);
+      }
+      *counter = 1;
+      *prev_char = curr_char;
+    } else {
+      (*counter)++;
+    }
   }
 }
