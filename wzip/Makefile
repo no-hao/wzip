@@ -9,7 +9,7 @@ OBJECTS = $(SOURCES:.c=.o)
 all: $(TARGET)
 
 $(TARGET): $(OBJECTS)
-	$(CC) $(CFLAGS) $(INCLUDE_DIRS) -o $@ $^
+	$(CC) $(CFLAGS) $(INCLUDE_DIRS) -o $@ $^ -pthread
 
 $(SRCDIR)/%.o: $(SRCDIR)/%.c
 	$(CC) $(CFLAGS) $(INCLUDE_DIRS) -c $< -o $@
